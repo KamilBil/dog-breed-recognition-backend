@@ -9,7 +9,7 @@ from helpers import CATEGORIES
 
 app = FastAPI()
 
-loaded_model = tf.keras.models.load_model('dog_breeds_v1')
+loaded_model = tf.keras.models.load_model('models/dog_breeds_v1')
 
 
 def preprocess_image(image_content, target_size):
