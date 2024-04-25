@@ -35,7 +35,7 @@ async def predict(file: UploadFile = File(...)):
     })
 
 
-@app.post("/breeds")
+@app.get("/breeds")
 async def available_breeds():
     return JSONResponse(content={
         "breeds": CATEGORIES
