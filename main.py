@@ -1,6 +1,7 @@
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 from PIL import Image
 from io import BytesIO
@@ -8,6 +9,14 @@ from io import BytesIO
 from helpers import CATEGORIES
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 loaded_model = tf.keras.models.load_model('models/dog_breeds_v1')
 
