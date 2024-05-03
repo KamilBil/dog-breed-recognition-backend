@@ -40,7 +40,7 @@ async def predict(file: UploadFile = File(...)):
     return JSONResponse(content={
         "filename": file.filename,
         "content_type": file.content_type,
-        "breed": CATEGORIES[predicted_index],
+        "breed": CATEGORIES[predicted_index].replace("_", " "),
     })
 
 
