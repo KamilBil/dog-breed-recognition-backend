@@ -1,6 +1,8 @@
+import os
+
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 from PIL import Image
@@ -19,6 +21,14 @@ app.add_middleware(
 )
 
 loaded_model = tf.keras.models.load_model('models/dog_breeds_v1')
+
+
+def breed_images(breed: str, path: str):
+    breed_dir = [d for d in os.listdir(path) if d.lower().endswith(breed.strip().replace(" ", "-"))]
+    if breed_dir:
+        images = [os.path.join(path, breed_dir[0], f) for f in os.listdir(os.path.join(path, breed_dir[0])) if
+                  os.path.isfile(os.path.join(path, breed_dir[0], f)) and f.endswith('.jpg')]
+        return images
 
 
 def preprocess_image(image_content, target_size):
@@ -49,3 +59,12 @@ async def available_breeds():
     return JSONResponse(content={
         "breeds": CATEGORIES
     })
+
+
+@app.get("/image")
+async def get_image(breed_name: str):
+    path = "Images"
+    imgs = breed_images(breed_name, path)
+    if imgs:
+        return FileResponse(imgs[0])
+    raise HTTPException(status_code=404, detail="Breed not found")
