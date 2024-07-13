@@ -24,7 +24,7 @@ loaded_model = tf.keras.models.load_model('models/dog_breeds_v1')
 
 
 def breed_images(breed: str, path: str):
-    breed_dir = [d for d in os.listdir(path) if d.lower().split("-")[1] == (breed.strip().replace(" ", "-"))]
+    breed_dir = [d for d in os.listdir(path) if d.lower().split("-")[1] == (breed.strip().replace(" ", "_"))]
     if breed_dir:
         images = [os.path.join(path, breed_dir[0], f) for f in os.listdir(os.path.join(path, breed_dir[0])) if
                   os.path.isfile(os.path.join(path, breed_dir[0], f)) and f.endswith('.jpg')]
