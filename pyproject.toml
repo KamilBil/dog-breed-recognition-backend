@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "dog_breed_recognition_backend"
+version = "0.1.0"
+description = "REST API to recognize dog breed from a photo."
+authors = ["Kamil Bil <bilkamil@outlook.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+tensorflow = "2.15.0"
+fastapi = "*"
+pydantic = "*"
+requests = "*"
+python-jose = "*"
+sqlalchemy = "*"
+uvicorn = "*"
+pillow = "*"
+httpx = "*"
+psycopg2-binary = "*"
+python-multipart = "*"
