@@ -1,7 +1,6 @@
 import os
 import numpy as np
-import requests
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status, Request, Response
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
@@ -12,9 +11,10 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from jose import jwt, JWTError
 import httpx
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -26,8 +26,9 @@ app = FastAPI()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # DB config
-engine = create_engine(os.getenv("DATABASE_URL"))
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_async_engine(os.getenv("DATABASE_URL"))
+AsyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession,
+                                 expire_on_commit=False)
 Base = declarative_base()
 
 # JWT config
@@ -41,7 +42,7 @@ class TokenModel(BaseModel):
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=["*"],  # os.getenv("CORS_ORIGINS", "").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -61,7 +62,12 @@ class User(Base):
     name = Column(String, default=False)
 
 
-Base.metadata.create_all(bind=engine)
+async def create_tables():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+create_tables()
 
 
 class UserInDB(BaseModel):
@@ -72,65 +78,107 @@ class UserInDB(BaseModel):
     is_admin: bool
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+def is_on_production():
+    return os.getenv("DEBUG").lower().strip() != "true"
 
 
 @app.post("/auth/google")
-async def authenticate_user(auth_data: AuthCode, db: Session = Depends(get_db)):
+async def authenticate_user(response: Response, auth_data: AuthCode, db: AsyncSession = Depends(get_db)):
     token_url = "https://oauth2.googleapis.com/token"
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
 
+    # server config validation
+    if not (client_id and client_secret and redirect_uri):
+        raise HTTPException(status_code=500, detail="Server environment configuration error")
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     data = {
         "code": auth_data.code,
-        "client_id": os.getenv("GOOGLE_CLIENT_ID"),
-        "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
-        "redirect_uri": os.getenv("GOOGLE_REDIRECT_URI"),
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
         "grant_type": "authorization_code"
     }
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(token_url, headers=headers, data=data)
-        print("response123: ", response.content)
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail="Error exchanging code for token")
+    try:
+        async with httpx.AsyncClient() as client:
+            # exchange of a code for a token
+            response2 = await client.post(token_url, headers=headers, data=data)
+            response2.raise_for_status()
+            token_data = response2.json()
 
-    token_data = response.json()
-    access_token = token_data.get("access_token")
-    if not access_token:
-        raise HTTPException(status_code=400, detail="No access token in Google response")
+            access_token = token_data.get("access_token")
+            if not access_token:
+                raise HTTPException(status_code=400, detail="No access token in Google response")
 
-    response = requests.get(f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={access_token}")
-    if response.status_code != 200:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Google token")
+            # Token verification
+            response3 = await client.get(f"https://www.googleapis.com/oauth2/v3/tokeninfo?access_token={access_token}")
+            response3.raise_for_status()
+            user_info = response3.json()
 
-    user_info = response.json()
-    google_id = user_info["sub"]
-    email = user_info["email"]
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"HTTP request error: {e}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {e.response.text}")
+
+    # user data procession
+    google_id = user_info.get("sub")
+    email = user_info.get("email")
     name = user_info.get("name", "Unknown")
 
-    # Checking whether the user already exists in the database
-    user = db.query(User).filter(User.google_id == google_id).first()
+    if not (google_id and email):
+        raise HTTPException(status_code=400, detail="Invalid user data from Google")
+
+    # Downloading or creating a user in the database
+    user = await get_user_by_google_id(db, google_id)
     if not user:
-        # Create a new user
         user = User(google_id=google_id, email=email, name=name)
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
 
-    # Generating a JWT token for the application
+    # Create JWT
     jwt_token = create_jwt_token({"sub": str(user.id), "email": user.email})
-    return {"access_token": jwt_token, "token_type": "bearer"}
+    secure_flag = is_on_production()
+
+    # create a cookie
+    response.set_cookie(
+        key="access_token",
+        value=jwt_token,
+        httponly=True,
+        secure=secure_flag,
+        samesite="Strict" if is_on_production() else "Lax",
+        domain=None,
+        path="/",
+    )
+
+    return {"message": "Login successful"}
 
 
 def create_jwt_token(data: dict):
     return jwt.encode(data, os.getenv("SECRET_KEY"), algorithm=ALGORITHM)
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int):
+    async with session.begin():
+        stmt = select(User).where(User.id == user_id)
+        result = await session.execute(stmt)
+        return result.scalars().first()
+
+
+async def get_user_by_google_id(session: AsyncSession, user_google_id: int):
+    async with session.begin():
+        stmt = select(User).where(User.google_id == user_google_id)
+        result = await session.execute(stmt)
+        user = result.scalars().first()
+        return user
 
 
 @app.get("/admin_panel_stats")
@@ -141,13 +189,37 @@ async def admin_panel_stats(token: str = Depends(oauth2_scheme), db: Session = D
         if user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-        user = db.query(User).filter(User.id == user_id).first()
+        user = await get_user_by_id(db, user_id)
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         return {"email": user.email, "name": user.name}
 
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate token")
+
+
+@app.get("/auth/verify")
+def verify_user(request: Request):
+    token = request.cookies.get("access_token")
+    if not token:
+        return {"authenticated": False}
+
+    try:
+        payload = jwt.decode(token, os.getenv("SECRET_KEY"), algorithms=[ALGORITHM])
+        return {"authenticated": True, "user": payload["sub"]}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+@app.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        secure=is_on_production(),
+        samesite="Strict" if is_on_production() else "Lax",
+    )
+    return {"message": "Logged out successfully"}
 
 
 def breed_images(breed: str, path: str):

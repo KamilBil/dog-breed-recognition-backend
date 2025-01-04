@@ -11,9 +11,10 @@ fastapi = "*"
 pydantic = "*"
 requests = "*"
 python-jose = "*"
-sqlalchemy = "*"
 uvicorn = "*"
 pillow = "*"
 httpx = "*"
 psycopg2-binary = "*"
 python-multipart = "*"
+sqlalchemy = { version = "*", extras = ["async"] }
+databases = { version = "^0.5.4", extras = ["postgresql"] }

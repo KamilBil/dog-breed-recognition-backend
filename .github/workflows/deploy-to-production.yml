@@ -23,9 +23,13 @@ jobs:
         uses: docker/setup-buildx-action@v3
       -
         name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/dog-breed-recognition-backend:latest
+        run: |
+          docker-compose build
+
+          - name: Verify image
+            run: |
+              docker images
+
+          - name: Push image (optional)
+            run: |
+              docker push ${{ secrets.DOCKERHUB_USERNAME }}/dog-breed-recognition-backend:latest
