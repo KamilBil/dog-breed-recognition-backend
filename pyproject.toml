@@ -3,6 +3,7 @@ name = "dog_breed_recognition_backend"
 version = "0.1.0"
 description = "REST API to recognize dog breed from a photo."
 authors = ["Kamil Bil <bilkamil@outlook.com>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
