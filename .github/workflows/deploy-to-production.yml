@@ -31,6 +31,6 @@ jobs:
         run: |
           docker images
 
-      - name: Push image
+      - name: Push image (optional)
         run: |
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/dog-breed-recognition-backend:latest
