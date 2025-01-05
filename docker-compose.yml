@@ -16,7 +16,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${DOCKERHUB_USERNAME}/dog-breed-recognition-backend:latest
+    image: ${DOCKERHUB_USERNAME}/dog-breed-recognition-backend:${DOCKER_TAG}
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
